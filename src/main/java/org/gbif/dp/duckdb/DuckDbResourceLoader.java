@@ -4,11 +4,14 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class DuckDbResourceLoader {
 
-  public void createResourceView(Connection connection, String resourceName, Path resourcePath)
+  public void createResourceView(Connection connection, String resourceName, List<Path> resourcePath)
       throws SQLException {
     String sql =
         "CREATE OR REPLACE VIEW "
@@ -20,16 +23,32 @@ public class DuckDbResourceLoader {
     }
   }
 
-  private static String tableFunction(Path path) {
-    String normalizedPath = path.toAbsolutePath().toString().replace("'", "''");
-    String lower = normalizedPath.toLowerCase(Locale.ROOT);
+  private enum FileType {
+    CSV(".csv"), TSV(".tsv"), PARQUET(".parquet");
+
+    private final String extension;
+
+    FileType(String extension) {
+      this.extension = extension;
+    }
+  }
+
+  private static String tableFunction(List<Path> paths) {
+    String joinedPaths = paths.stream()
+            .map(Path::toAbsolutePath)
+            .map(Object::toString)
+            .map(str -> str.replace("'", "''"))
+            .map(str -> "'" + str + "'")
+            .collect(Collectors.joining(", "));
+
+    String lower = paths.get(0).toAbsolutePath().toString().toLowerCase(Locale.ROOT);
     if (lower.endsWith(".parquet")) {
-      return "read_parquet('" + normalizedPath + "')";
+      return "read_parquet([" + joinedPaths + "])";
     }
     if (lower.endsWith(".tsv")) {
-      return "read_csv_auto('" + normalizedPath + "', delim='\\t', header=true, sample_size=-1)";
+      return "read_csv_auto([" + joinedPaths + "], delim='\\t', header=true, sample_size=-1)";
     }
-    return "read_csv_auto('" + normalizedPath + "', header=true, sample_size=-1)";
+    return "read_csv_auto([" + joinedPaths + "], header=true, sample_size=-1)";
   }
 
   private static String quotedIdentifier(String value) {

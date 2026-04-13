@@ -19,7 +19,7 @@ public class ValidationCli {
 
   public static void main(String[] args) throws Exception {
     if (args.length == 0) {
-      System.err.println("Usage: ValidationCli <path-to-datapackage.json>");
+      System.err.println("Usage: ValidationCli <paths-to-datapackage.json>");
       System.exit(1);
     }
     Instant startTimer = Instant.now();

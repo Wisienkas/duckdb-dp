@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
+import java.util.stream.StreamSupport;
 
 public class JacksonDataPackageParser implements DataPackageParser {
 
@@ -36,16 +38,32 @@ public class JacksonDataPackageParser implements DataPackageParser {
 
     for (JsonNode resourceNode : resourceNodes) {
       String name = resourceNode.path("name").asText("");
-      String relativePath = resourceNode.path("path").asText("");
-      if (name.isBlank() || relativePath.isBlank()) {
+      if (name.isBlank()) {
+        continue;
+      }
+      List<Path> paths = new ArrayList<>();
+      JsonNode pathNode = resourceNode.path("path");
+      if (pathNode.isArray()) {
+        StreamSupport.stream(pathNode.spliterator(), false)
+                .map(node -> node.asText(""))
+                .filter(Predicate.not(String::isBlank))
+                .map(str -> descriptorPath.getParent().resolve(str).normalize())
+                .forEach(paths::add);
+      } else {
+        String relativePath = pathNode.asText("");
+        if (!relativePath.isBlank()) {
+          Path resourcePath = descriptorPath.getParent().resolve(relativePath).normalize();
+          paths.add(resourcePath);
+        }
+      }
+      if (paths.isEmpty()) {
         continue;
       }
 
-      Path resourcePath = descriptorPath.getParent().resolve(relativePath).normalize();
       JsonNode schemaNode = resourceNode.path("schema");
       List<FieldDescriptor> fields = parseFields(schemaNode.path("fields"));
       List<ForeignKeyDescriptor> foreignKeys = parseForeignKeys(schemaNode.path("foreignKeys"));
-      ResourceDescriptor descriptor = new ResourceDescriptor(name, resourcePath, fields, foreignKeys);
+      ResourceDescriptor descriptor = new ResourceDescriptor(name, paths, fields, foreignKeys);
       resources.add(descriptor);
       byName.put(name, descriptor);
     }

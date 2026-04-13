@@ -5,6 +5,6 @@ import java.util.List;
 
 public record ResourceDescriptor(
     String name,
-    Path path,
+    List<Path> paths,
     List<FieldDescriptor> fields,
     List<ForeignKeyDescriptor> foreignKeys) {}

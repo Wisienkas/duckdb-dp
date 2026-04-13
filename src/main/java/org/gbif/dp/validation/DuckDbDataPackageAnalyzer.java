@@ -47,8 +47,8 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
 
     try (Connection connection = DriverManager.getConnection(options.jdbcUrl())) {
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        System.out.printf("Creating view for %s -> %s%n", resource.name(), resource.path());
-        resourceLoader.createResourceView(connection, resource.name(), resource.path());
+        System.out.printf("Creating view for %s -> %s%n", resource.name(), resource.paths());
+        resourceLoader.createResourceView(connection, resource.name(), resource.paths());
       }
 
       // Foreign key validation
@@ -69,7 +69,13 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
             List.copyOf(dtViolations));
   }
 
-  private void analyseResource(ValidationOptions options, ResourceDescriptor resource, Connection connection, DataPackageDescriptor dataPackageDescriptor, Map<String, ResourceDescription> resourceDescriptions, List<ForeignKeyViolation> fkViolations) throws SQLException {
+  private void analyseResource(ValidationOptions options,
+                               ResourceDescriptor resource,
+                               Connection connection,
+                               DataPackageDescriptor dataPackageDescriptor,
+                               Map<String,
+                               ResourceDescription> resourceDescriptions,
+                               List<ForeignKeyViolation> fkViolations) throws SQLException {
     List<ForeignKeyViolation> foreignKeyViolations = new ArrayList<>();
     List<ColumnDescription> columnDescriptions = new ArrayList<>();
     for (ForeignKeyDescriptor key : resource.foreignKeys()) {
