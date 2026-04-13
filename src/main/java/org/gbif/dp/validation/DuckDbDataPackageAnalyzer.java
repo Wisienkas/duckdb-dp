@@ -13,24 +13,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
-import org.gbif.dp.descriptor.DataPackageDescriptor;
-import org.gbif.dp.descriptor.DataPackageParser;
-import org.gbif.dp.descriptor.ForeignKeyDescriptor;
-import org.gbif.dp.descriptor.ReferenceDescriptor;
-import org.gbif.dp.descriptor.ResourceDescriptor;
+import java.util.stream.Collectors;
+
+import org.gbif.dp.descriptor.*;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
 
-public class DuckDbDataPackageValidator implements DataPackageValidator {
+public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
 
   private final DataPackageParser parser;
   private final DuckDbResourceLoader resourceLoader;
   private final DuckDbDataTypeValidator dataTypeValidator;
 
-  public DuckDbDataPackageValidator(DataPackageParser parser, DuckDbResourceLoader resourceLoader) {
+  public DuckDbDataPackageAnalyzer(DataPackageParser parser, DuckDbResourceLoader resourceLoader) {
     this(parser, resourceLoader, new DuckDbDataTypeValidator());
   }
 
-  public DuckDbDataPackageValidator(
+  public DuckDbDataPackageAnalyzer(
       DataPackageParser parser,
       DuckDbResourceLoader resourceLoader,
       DuckDbDataTypeValidator dataTypeValidator) {
@@ -45,31 +43,98 @@ public class DuckDbDataPackageValidator implements DataPackageValidator {
     DataPackageDescriptor dataPackageDescriptor = parser.parse(descriptorPath);
     List<ForeignKeyViolation> fkViolations = new ArrayList<>();
     List<DataTypeViolation> dtViolations = new ArrayList<>();
+    Map<String, ResourceDescription> resourceDescriptions = new HashMap<>();
 
     try (Connection connection = DriverManager.getConnection(options.jdbcUrl())) {
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
+        System.out.printf("Creating view for %s -> %s%n", resource.name(), resource.path());
         resourceLoader.createResourceView(connection, resource.name(), resource.path());
       }
 
       // Foreign key validation
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        for (ForeignKeyDescriptor key : resource.foreignKeys()) {
-          ForeignKeyViolation violation =
-              validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
-          if (violation.violationCount() > 0) {
-            fkViolations.add(violation);
-          }
-        }
+        analyseResource(options, resource, connection, dataPackageDescriptor, resourceDescriptions, fkViolations);
       }
 
       // Data type validation
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
         dtViolations.addAll(dataTypeValidator.validate(connection, resource, options.sampleSize()));
       }
+
     }
 
-    return new ValidationResult(List.copyOf(fkViolations), List.copyOf(dtViolations));
+    return new ValidationResult(
+            List.copyOf(resourceDescriptions.values()),
+            List.copyOf(fkViolations),
+            List.copyOf(dtViolations));
   }
+
+  private void analyseResource(ValidationOptions options, ResourceDescriptor resource, Connection connection, DataPackageDescriptor dataPackageDescriptor, Map<String, ResourceDescription> resourceDescriptions, List<ForeignKeyViolation> fkViolations) throws SQLException {
+    List<ForeignKeyViolation> foreignKeyViolations = new ArrayList<>();
+    List<ColumnDescription> columnDescriptions = new ArrayList<>();
+    for (ForeignKeyDescriptor key : resource.foreignKeys()) {
+      System.out.printf("Checking referential integrity for %s[%s]->%s[%s]%n",
+              resource.name(),
+              String.join(",", key.fields()),
+              key.reference().resource(),
+              String.join(",", key.reference().fields())
+              );
+      ForeignKeyViolation violation =
+          validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
+      if (violation.violationCount() > 0) {
+        foreignKeyViolations.add(violation);
+      }
+    }
+    for (var field : resource.fields()) {
+      ColumnDescription columnDescription = analyseColumn(connection, field, resource);
+      columnDescriptions.add(columnDescription);
+    }
+    long rowCount = countRows(connection, resource);
+    resourceDescriptions.put(resource.name(), new ResourceDescription(
+            resource.name(),
+            foreignKeyViolations,
+            columnDescriptions,
+            rowCount));
+
+    fkViolations.addAll(foreignKeyViolations);
+  }
+
+  private long countRows(Connection connection, ResourceDescriptor resource) throws SQLException {
+      String sql = "SELECT COUNT(*) FROM " + q(resource.name());
+      try (PreparedStatement statement = connection.prepareStatement(sql);
+           ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getLong(1);
+      }
+    }
+
+  private ColumnDescription analyseColumn(
+            Connection connection,
+            FieldDescriptor field,
+            ResourceDescriptor resource)
+            throws SQLException {
+        String sql = createColumnSql(field, resource);
+
+      try (PreparedStatement statement = connection.prepareStatement(sql);
+           ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        ColumnDescription columnDescription = new ColumnDescription(
+                field.name(),
+                resultSet.getLong(1),
+                resultSet.getLong(2));
+        return columnDescription;
+      }
+    }
+
+    private String createColumnSql(FieldDescriptor field, ResourceDescriptor resource) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("select");
+        sb.append(" COUNT(").append(q(field.name())).append("),");
+        sb.append(" COUNT(DISTINCT ").append(q(field.name())).append(")");
+        sb.append(" FROM ").append(q(resource.name()));
+
+        return sb.toString();
+    }
 
   private ForeignKeyViolation validateForeignKey(
       Connection connection,
@@ -87,6 +152,25 @@ public class DuckDbDataPackageValidator implements DataPackageValidator {
     }
 
     String countSql = buildViolationCountSql(resource.name(), key.fields(), parentResource.name(), reference.fields());
+    String fullCountSql = buildCountQuerySql(resource.name(), key.fields());
+    try (PreparedStatement statement = connection.prepareStatement(fullCountSql);
+         ResultSet resultSet = statement.executeQuery()) {
+      resultSet.next();
+
+      StringBuilder sb = new StringBuilder()
+              .append("counting rows and relevant rows for ")
+              .append(resource.name())
+              .append("(").append(resultSet.getLong(1)).append(")")
+              .append("[");
+      for (int i = 0; i < key.fields().size(); i++) {
+        String fieldName = key.fields().get(i);
+        Long count = resultSet.getLong(i + 2);
+        sb.append("{ ").append(fieldName).append(" -> ").append(count).append("}");
+      }
+
+      System.out.println(sb);
+    }
+
     long count;
     try (PreparedStatement statement = connection.prepareStatement(countSql);
         ResultSet resultSet = statement.executeQuery()) {
@@ -102,6 +186,17 @@ public class DuckDbDataPackageValidator implements DataPackageValidator {
     return new ForeignKeyViolation(
         resource.name(), key.fields(), parentResource.name(), reference.fields(), count, samples);
   }
+
+    private String buildCountQuerySql(String name, List<String> keys) {
+      String sumOfKeysSql = keys.stream()
+              .map(key -> "COUNT(" + q(key) + ")")
+              .collect(Collectors.joining(", "));
+
+      return "SELECT COUNT(*), " +
+              sumOfKeysSql +
+              " FROM " +
+              q(name);
+    }
 
   private List<Map<String, Object>> fetchSampleRows(
       Connection connection,

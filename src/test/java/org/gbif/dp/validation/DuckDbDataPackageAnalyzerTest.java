@@ -10,7 +10,7 @@ import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
 import org.junit.jupiter.api.Test;
 
-class DuckDbDataPackageValidatorTest {
+class DuckDbDataPackageAnalyzerTest {
 
   @Test
   void shouldValidateForeignKeysFromDescriptor() throws Exception {
@@ -52,7 +52,7 @@ class DuckDbDataPackageValidatorTest {
         """);
 
     DataPackageValidator validator =
-        new DuckDbDataPackageValidator(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
     ValidationResult result =
         validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
@@ -92,7 +92,7 @@ class DuckDbDataPackageValidatorTest {
         """);
 
     DataPackageValidator validator =
-        new DuckDbDataPackageValidator(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
     ValidationResult result =
         validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
@@ -146,7 +146,7 @@ class DuckDbDataPackageValidatorTest {
         """);
 
     DataPackageValidator validator =
-        new DuckDbDataPackageValidator(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
     ValidationResult result =
         validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());

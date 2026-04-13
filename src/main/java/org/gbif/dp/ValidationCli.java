@@ -1,11 +1,16 @@
 package org.gbif.dp;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
 import org.gbif.dp.validation.DataPackageValidator;
 import org.gbif.dp.validation.DataTypeViolation;
-import org.gbif.dp.validation.DuckDbDataPackageValidator;
+import org.gbif.dp.validation.DuckDbDataPackageAnalyzer;
 import org.gbif.dp.validation.ForeignKeyViolation;
 import org.gbif.dp.validation.ValidationOptions;
 import org.gbif.dp.validation.ValidationResult;
@@ -17,13 +22,16 @@ public class ValidationCli {
       System.err.println("Usage: ValidationCli <path-to-datapackage.json>");
       System.exit(1);
     }
+    Instant startTimer = Instant.now();
 
     DataPackageValidator validator =
-        new DuckDbDataPackageValidator(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
     ValidationResult result = validator.validate(Path.of(args[0]), ValidationOptions.defaults());
 
     if (result.isValid()) {
       System.out.println("All validations passed.");
+
+      printResult(result, startTimer);
       return;
     }
 
@@ -49,6 +57,18 @@ public class ValidationCli {
       }
     }
 
+    printResult(result, startTimer);
     System.exit(2);
+  }
+
+  private static void printResult(ValidationResult result, Instant startTimer) throws JsonProcessingException {
+    ObjectMapper objectMapper = new ObjectMapper();
+    String resultAsString = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(result);
+    System.out.println(resultAsString);
+    Duration duration = Duration.between(startTimer, Instant.now());
+    System.out.printf("duration: %02d:%02d:%02d %n",
+            duration.toHoursPart(),
+            duration.toMinutesPart(),
+            duration.toSecondsPart());
   }
 }
