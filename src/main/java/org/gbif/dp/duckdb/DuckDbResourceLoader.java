@@ -6,15 +6,14 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 public class DuckDbResourceLoader {
 
-  public void createResourceView(Connection connection, String resourceName, List<Path> resourcePath)
+  public void createResourceTempTable(Connection connection, String resourceName, List<Path> resourcePath)
       throws SQLException {
     String sql =
-        "CREATE OR REPLACE VIEW "
+        "CREATE TEMP TABLE "
             + quotedIdentifier(resourceName)
             + " AS SELECT * FROM "
             + tableFunction(resourcePath);

@@ -1,0 +1,9 @@
+# Ignore python environment
+.venv
+
+# Ignore datasets
+data/
+
+# ignore output from runs
+logs/
+out/

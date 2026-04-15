@@ -1,14 +1,14 @@
-package org.gbif.dp.validation;
+package org.gbif.dp.validation.model;
 
 import java.util.List;
 
 public record ValidationResult(
         List<ResourceDescription> ResourceAnalysisState,
-        List<ForeignKeyViolation> foreignKeyViolations,
+        List<KeyViolation> keyViolations,
         List<DataTypeViolation> dataTypeViolations
     ) {
 
   public boolean isValid() {
-    return foreignKeyViolations.isEmpty() && dataTypeViolations.isEmpty();
+    return keyViolations.isEmpty() && dataTypeViolations.isEmpty();
   }
 }

@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
+import org.gbif.dp.validation.model.DataTypeViolation;
+import org.gbif.dp.validation.model.ValidationResult;
 import org.junit.jupiter.api.Test;
 
 class DuckDbDataPackageAnalyzerTest {
@@ -58,8 +60,8 @@ class DuckDbDataPackageAnalyzerTest {
         validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
 
     assertFalse(result.isValid());
-    assertEquals(1, result.foreignKeyViolations().size());
-    assertEquals(1, result.foreignKeyViolations().get(0).violationCount());
+    assertEquals(1, result.keyViolations().size());
+    assertEquals(1, result.keyViolations().get(0).violationCount());
   }
 
   @Test
@@ -98,7 +100,7 @@ class DuckDbDataPackageAnalyzerTest {
         validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
 
     assertFalse(result.isValid());
-    assertTrue(result.foreignKeyViolations().isEmpty());
+    assertTrue(result.keyViolations().isEmpty());
     // age has 1 bad value ("notanumber"), active has 1 ("maybe"), birth_date has 1 ("not-a-date")
     assertEquals(3, result.dataTypeViolations().size());
 

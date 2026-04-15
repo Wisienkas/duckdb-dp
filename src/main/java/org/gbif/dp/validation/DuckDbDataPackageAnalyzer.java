@@ -2,12 +2,7 @@ package org.gbif.dp.validation;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -17,8 +12,13 @@ import java.util.stream.Collectors;
 
 import org.gbif.dp.descriptor.*;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
+import org.gbif.dp.validation.model.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
+
+  private static final Logger log = LoggerFactory.getLogger(DuckDbDataPackageAnalyzer.class);
 
   private final DataPackageParser parser;
   private final DuckDbResourceLoader resourceLoader;
@@ -41,14 +41,27 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
   public ValidationResult validate(Path descriptorPath, ValidationOptions options)
       throws IOException, SQLException {
     DataPackageDescriptor dataPackageDescriptor = parser.parse(descriptorPath);
-    List<ForeignKeyViolation> fkViolations = new ArrayList<>();
+    List<KeyViolation> fkViolations = new ArrayList<>();
     List<DataTypeViolation> dtViolations = new ArrayList<>();
     Map<String, ResourceDescription> resourceDescriptions = new HashMap<>();
 
     try (Connection connection = DriverManager.getConnection(options.jdbcUrl())) {
+      /*
+      if (options.duckDbConfig() != null) {
+        try (Statement st = connection.createStatement()) {
+          st.execute("SET memory_limit = " + sq(options.duckDbConfig().dbMemory()));
+          st.execute("SET threads = " + options.duckDbConfig().dbMemory());
+          if (options.duckDbConfig().dbTempDir() != null) {
+            st.execute("SET temp_directory = " + sq(options.duckDbConfig().dbTempDir()));
+          }
+          st.execute("SET memory_limit = " + sq(options.duckDbConfig().dbMemory()));
+        }
+      }
+       */
+
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        System.out.printf("Creating view for %s -> %s%n", resource.name(), resource.paths());
-        resourceLoader.createResourceView(connection, resource.name(), resource.paths());
+        log.info("Creating temp table for {} -> {}", resource.name(), resource.paths());
+        resourceLoader.createResourceTempTable(connection, resource.name(), resource.paths());
       }
 
       // Foreign key validation
@@ -69,26 +82,30 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
             List.copyOf(dtViolations));
   }
 
+    private String sq(String s) {
+        return "'" + s + "'";
+    }
+
   private void analyseResource(ValidationOptions options,
                                ResourceDescriptor resource,
                                Connection connection,
                                DataPackageDescriptor dataPackageDescriptor,
                                Map<String,
                                ResourceDescription> resourceDescriptions,
-                               List<ForeignKeyViolation> fkViolations) throws SQLException {
-    List<ForeignKeyViolation> foreignKeyViolations = new ArrayList<>();
+                               List<KeyViolation> fkViolations) throws SQLException {
+    List<KeyViolation> keyViolations = new ArrayList<>();
     List<ColumnDescription> columnDescriptions = new ArrayList<>();
     for (ForeignKeyDescriptor key : resource.foreignKeys()) {
-      System.out.printf("Checking referential integrity for %s[%s]->%s[%s]%n",
+      log.info("Checking referential integrity for {}[{}]->{}[{}]",
               resource.name(),
               String.join(",", key.fields()),
               key.reference().resource(),
               String.join(",", key.reference().fields())
               );
-      ForeignKeyViolation violation =
+      KeyViolation violation =
           validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
       if (violation.violationCount() > 0) {
-        foreignKeyViolations.add(violation);
+        keyViolations.add(violation);
       }
     }
     for (var field : resource.fields()) {
@@ -98,11 +115,11 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
     long rowCount = countRows(connection, resource);
     resourceDescriptions.put(resource.name(), new ResourceDescription(
             resource.name(),
-            foreignKeyViolations,
+            keyViolations,
             columnDescriptions,
             rowCount));
 
-    fkViolations.addAll(foreignKeyViolations);
+    fkViolations.addAll(keyViolations);
   }
 
   private long countRows(Connection connection, ResourceDescriptor resource) throws SQLException {
@@ -142,7 +159,7 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
         return sb.toString();
     }
 
-  private ForeignKeyViolation validateForeignKey(
+  private KeyViolation validateForeignKey(
       Connection connection,
       DataPackageDescriptor dataPackage,
       ResourceDescriptor resource,
@@ -154,7 +171,7 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
     String parentName = reference.resource().isBlank() ? resource.name() : reference.resource();
     ResourceDescriptor parentResource = dataPackage.resourcesByName().get(parentName);
     if (parentResource == null) {
-      return new ForeignKeyViolation(resource.name(), key.fields(), parentName, reference.fields(), 0L, List.of());
+      return new KeyViolation(resource.name(), key.fields(), parentName, reference.fields(), 0L, List.of());
     }
 
     String countSql = buildViolationCountSql(resource.name(), key.fields(), parentResource.name(), reference.fields());
@@ -174,7 +191,7 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
         sb.append("{ ").append(fieldName).append(" -> ").append(count).append("}");
       }
 
-      System.out.println(sb);
+      log.info(sb.toString());
     }
 
     long count;
@@ -189,7 +206,7 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
             ? List.of()
             : fetchSampleRows(connection, resource.name(), key.fields(), parentResource.name(), reference.fields(), sampleSize);
 
-    return new ForeignKeyViolation(
+    return new KeyViolation(
         resource.name(), key.fields(), parentResource.name(), reference.fields(), count, samples);
   }
 
