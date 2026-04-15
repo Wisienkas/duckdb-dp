@@ -1,4 +1,4 @@
-package org.gbif.dp.validation.model;
+package org.gbif.dp.analysis.model;
 
 public record ColumnDescription(
         String name,

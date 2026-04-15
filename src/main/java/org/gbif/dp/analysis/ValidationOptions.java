@@ -1,4 +1,4 @@
-package org.gbif.dp.validation;
+package org.gbif.dp.analysis;
 
 import org.gbif.dp.duckdb.DefaultDuckDbConfig;
 import org.gbif.dp.duckdb.DuckDbConfig;

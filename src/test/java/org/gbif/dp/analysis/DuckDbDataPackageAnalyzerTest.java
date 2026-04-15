@@ -1,4 +1,4 @@
-package org.gbif.dp.validation;
+package org.gbif.dp.analysis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,8 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
-import org.gbif.dp.validation.model.DataTypeViolation;
-import org.gbif.dp.validation.model.ValidationResult;
+import org.gbif.dp.analysis.model.DataTypeViolation;
+import org.gbif.dp.analysis.model.ValidationResult;
 import org.junit.jupiter.api.Test;
 
 class DuckDbDataPackageAnalyzerTest {

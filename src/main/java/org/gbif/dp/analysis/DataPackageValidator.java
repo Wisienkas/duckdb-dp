@@ -1,6 +1,6 @@
-package org.gbif.dp.validation;
+package org.gbif.dp.analysis;
 
-import org.gbif.dp.validation.model.ValidationResult;
+import org.gbif.dp.analysis.model.ValidationResult;
 
 import java.io.IOException;
 import java.nio.file.Path;

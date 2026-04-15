@@ -1,4 +1,4 @@
-package org.gbif.dp.validation;
+package org.gbif.dp.analysis;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 
 import org.gbif.dp.descriptor.*;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
-import org.gbif.dp.validation.model.*;
+import org.gbif.dp.analysis.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
