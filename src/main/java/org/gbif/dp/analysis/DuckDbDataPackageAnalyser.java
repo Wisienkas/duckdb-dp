@@ -16,19 +16,19 @@ import org.gbif.dp.analysis.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
+public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
 
-  private static final Logger log = LoggerFactory.getLogger(DuckDbDataPackageAnalyzer.class);
+  private static final Logger log = LoggerFactory.getLogger(DuckDbDataPackageAnalyser.class);
 
   private final DataPackageParser parser;
   private final DuckDbResourceLoader resourceLoader;
   private final DuckDbDataTypeValidator dataTypeValidator;
 
-  public DuckDbDataPackageAnalyzer(DataPackageParser parser, DuckDbResourceLoader resourceLoader) {
+  public DuckDbDataPackageAnalyser(DataPackageParser parser, DuckDbResourceLoader resourceLoader) {
     this(parser, resourceLoader, new DuckDbDataTypeValidator());
   }
 
-  public DuckDbDataPackageAnalyzer(
+  public DuckDbDataPackageAnalyser(
       DataPackageParser parser,
       DuckDbResourceLoader resourceLoader,
       DuckDbDataTypeValidator dataTypeValidator) {
@@ -38,88 +38,128 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
   }
 
   @Override
-  public ValidationResult validate(Path descriptorPath, ValidationOptions options)
+  public DatapackageAnalysisResult analyse(Path descriptorPath, ValidationOptions options, List<AnalysisFeature> analysisFeatures)
       throws IOException, SQLException {
     DataPackageDescriptor dataPackageDescriptor = parser.parse(descriptorPath);
-    List<KeyViolation> fkViolations = new ArrayList<>();
-    List<DataTypeViolation> dtViolations = new ArrayList<>();
-    Map<String, ResourceDescription> resourceDescriptions = new HashMap<>();
 
     try (Connection connection = DriverManager.getConnection(options.jdbcUrl())) {
-      /*
-      if (options.duckDbConfig() != null) {
-        try (Statement st = connection.createStatement()) {
-          st.execute("SET memory_limit = " + sq(options.duckDbConfig().dbMemory()));
-          st.execute("SET threads = " + options.duckDbConfig().dbMemory());
-          if (options.duckDbConfig().dbTempDir() != null) {
-            st.execute("SET temp_directory = " + sq(options.duckDbConfig().dbTempDir()));
-          }
-          st.execute("SET memory_limit = " + sq(options.duckDbConfig().dbMemory()));
-        }
-      }
-       */
+      applyDuckDbOptions(options, connection);
 
       for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
         log.info("Creating temp table for {} -> {}", resource.name(), resource.paths());
         resourceLoader.createResourceTempTable(connection, resource.name(), resource.paths());
       }
 
-      // Foreign key validation
-      for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        analyseResource(options, resource, connection, dataPackageDescriptor, resourceDescriptions, fkViolations);
-      }
+      List<ResourceAnalysisResult> resourceAnalysisResults = analyseEachResource(options, analysisFeatures, dataPackageDescriptor, connection);
+      List<DataTypeViolation> dataTypeViolations = analyseDatapackageIntegrity(options, analysisFeatures, dataPackageDescriptor, connection);
 
-      // Data type validation
-      for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        dtViolations.addAll(dataTypeValidator.validate(connection, resource, options.sampleSize()));
-      }
-
+      return new DatapackageAnalysisResult(
+             List.copyOf(resourceAnalysisResults),
+             List.copyOf(dataTypeViolations)
+      );
     }
-
-    return new ValidationResult(
-            List.copyOf(resourceDescriptions.values()),
-            List.copyOf(fkViolations),
-            List.copyOf(dtViolations));
   }
 
-    private String sq(String s) {
+  private List<DataTypeViolation> analyseDatapackageIntegrity(
+          ValidationOptions options,
+          List<AnalysisFeature> analysisFeatures,
+          DataPackageDescriptor dataPackageDescriptor,
+          Connection connection)
+          throws SQLException {
+    List<DataTypeViolation> dataTypeViolations = new ArrayList<>();
+    if (analysisFeatures.contains(AnalysisFeature.DATAPACKAGE_VALIDATION)) {
+      // Data type validation
+      for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
+        dataTypeViolations.addAll(dataTypeValidator.validate(connection, resource, options.sampleSize()));
+      }
+    }
+    return dataTypeViolations;
+  }
+
+  private List<ResourceAnalysisResult> analyseEachResource(ValidationOptions options, List<AnalysisFeature> analysisFeatures, DataPackageDescriptor dataPackageDescriptor, Connection connection) throws SQLException {
+    List<ResourceAnalysisResult> resourceAnalysisResults = new ArrayList<>();
+    for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
+      ResourceAnalysisResult resourceAnalysisResult = analyseResource(
+              options,
+              resource,
+              connection,
+              dataPackageDescriptor,
+              analysisFeatures);
+      resourceAnalysisResults.add(resourceAnalysisResult);
+    }
+    return resourceAnalysisResults;
+  }
+
+  private void applyDuckDbOptions(ValidationOptions options, Connection connection) throws SQLException {
+    if (options.duckDbConfig() != null) {
+      try (Statement st = connection.createStatement()) {
+        if (!options.duckDbConfig().dbMemory().isBlank()) {
+          st.execute("PRAGMA memory_limit = " + sq(options.duckDbConfig().dbMemory()));
+        }
+        if (options.duckDbConfig().dbThreads() > 0) {
+          st.execute("PRAGMA threads = " + options.duckDbConfig().dbThreads());
+        }
+        if (!options.duckDbConfig().dbTempDir().isBlank()) {
+          st.execute("PRAGMA temp_directory = " + sq(options.duckDbConfig().dbTempDir()));
+        }
+        if (!options.duckDbConfig().dbMaxTemp().isBlank())
+          st.execute("PRAGMA memory_limit = " + sq(options.duckDbConfig().dbMaxTemp()));
+      }
+    }
+  }
+
+  private String sq(String s) {
         return "'" + s + "'";
     }
 
-  private void analyseResource(ValidationOptions options,
+  private ResourceAnalysisResult analyseResource(ValidationOptions options,
                                ResourceDescriptor resource,
                                Connection connection,
                                DataPackageDescriptor dataPackageDescriptor,
-                               Map<String,
-                               ResourceDescription> resourceDescriptions,
-                               List<KeyViolation> fkViolations) throws SQLException {
+                               List<AnalysisFeature> analysisFeatures) throws SQLException {
     List<KeyViolation> keyViolations = new ArrayList<>();
-    List<ColumnDescription> columnDescriptions = new ArrayList<>();
+    List<ColumnAnalysis> columnAnalyses = new ArrayList<>();
+    long rowCount = countRows(connection, resource);
+
+    if (analysisFeatures.contains(AnalysisFeature.FOREIGN_KEY_CONSTRAINT)) {
+      List<KeyViolation> foreignKeyViolations = findForeignKeyViolations(options, resource, connection, dataPackageDescriptor);
+      keyViolations.addAll(foreignKeyViolations);
+    }
+
+    if (analysisFeatures.contains(AnalysisFeature.COUNT) || analysisFeatures.contains(AnalysisFeature.COUNT_DISTINCT)) {
+      for (var field : resource.fields()) {
+        ColumnAnalysis columnAnalysis = analyseColumn(connection, field, resource);
+        columnAnalyses.add(columnAnalysis);
+      }
+    }
+
+    return new ResourceAnalysisResult(
+            resource.name(),
+            keyViolations,
+            columnAnalyses,
+            rowCount);
+  }
+
+  private List<KeyViolation> findForeignKeyViolations(
+          ValidationOptions options,
+          ResourceDescriptor resource,
+          Connection connection,
+          DataPackageDescriptor dataPackageDescriptor) throws SQLException {
+    List<KeyViolation> keyViolations = new ArrayList<>();
     for (ForeignKeyDescriptor key : resource.foreignKeys()) {
       log.info("Checking referential integrity for {}[{}]->{}[{}]",
               resource.name(),
               String.join(",", key.fields()),
               key.reference().resource(),
               String.join(",", key.reference().fields())
-              );
+      );
       KeyViolation violation =
-          validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
+              validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
       if (violation.violationCount() > 0) {
         keyViolations.add(violation);
       }
     }
-    for (var field : resource.fields()) {
-      ColumnDescription columnDescription = analyseColumn(connection, field, resource);
-      columnDescriptions.add(columnDescription);
-    }
-    long rowCount = countRows(connection, resource);
-    resourceDescriptions.put(resource.name(), new ResourceDescription(
-            resource.name(),
-            keyViolations,
-            columnDescriptions,
-            rowCount));
-
-    fkViolations.addAll(keyViolations);
+    return keyViolations;
   }
 
   private long countRows(Connection connection, ResourceDescriptor resource) throws SQLException {
@@ -131,7 +171,7 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
       }
     }
 
-  private ColumnDescription analyseColumn(
+  private ColumnAnalysis analyseColumn(
             Connection connection,
             FieldDescriptor field,
             ResourceDescriptor resource)
@@ -141,11 +181,11 @@ public class DuckDbDataPackageAnalyzer implements DataPackageValidator {
       try (PreparedStatement statement = connection.prepareStatement(sql);
            ResultSet resultSet = statement.executeQuery()) {
         resultSet.next();
-        ColumnDescription columnDescription = new ColumnDescription(
+        ColumnAnalysis columnAnalysis = new ColumnAnalysis(
                 field.name(),
                 resultSet.getLong(1),
                 resultSet.getLong(2));
-        return columnDescription;
+        return columnAnalysis;
       }
     }
 

@@ -4,7 +4,7 @@ public class DefaultDuckDbConfig implements DuckDbConfig {
     public static String DEFAULT_DB_MEMORY = "";
     public static String DEFAULT_DB_TEMP_DIR = "";
     public static String DEFAULT_DB_MAX_TEMP = "";
-    public static int DEFAULT_DB_MAX_THREADS = 2;
+    public static int DEFAULT_DB_MAX_THREADS = -1;
 
     @Override
     public String dbMemory() {

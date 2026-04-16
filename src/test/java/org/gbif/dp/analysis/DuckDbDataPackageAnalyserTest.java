@@ -6,13 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
 import org.gbif.dp.analysis.model.DataTypeViolation;
-import org.gbif.dp.analysis.model.ValidationResult;
+import org.gbif.dp.analysis.model.DatapackageAnalysisResult;
 import org.junit.jupiter.api.Test;
 
-class DuckDbDataPackageAnalyzerTest {
+class DuckDbDataPackageAnalyserTest {
 
   @Test
   void shouldValidateForeignKeysFromDescriptor() throws Exception {
@@ -53,11 +55,13 @@ class DuckDbDataPackageAnalyzerTest {
         }
         """);
 
-    DataPackageValidator validator =
-        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+    DataPackageAnalyser validator =
+        new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
-    ValidationResult result =
-        validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            AnalysisFeature.ALL_FEATURES);
 
     assertFalse(result.isValid());
     assertEquals(1, result.keyViolations().size());
@@ -93,14 +97,16 @@ class DuckDbDataPackageAnalyzerTest {
         }
         """);
 
-    DataPackageValidator validator =
-        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+    DataPackageAnalyser validator =
+        new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
-    ValidationResult result =
-        validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            AnalysisFeature.ALL_FEATURES);
 
-    assertFalse(result.isValid());
     assertTrue(result.keyViolations().isEmpty());
+    assertFalse(result.isValid());
     // age has 1 bad value ("notanumber"), active has 1 ("maybe"), birth_date has 1 ("not-a-date")
     assertEquals(3, result.dataTypeViolations().size());
 
@@ -147,11 +153,13 @@ class DuckDbDataPackageAnalyzerTest {
         }
         """);
 
-    DataPackageValidator validator =
-        new DuckDbDataPackageAnalyzer(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+    DataPackageAnalyser validator =
+        new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
 
-    ValidationResult result =
-        validator.validate(tempDir.resolve("datapackage.json"), ValidationOptions.defaults());
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            AnalysisFeature.ALL_FEATURES);
 
     assertTrue(result.isValid());
   }

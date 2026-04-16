@@ -5,7 +5,7 @@ import java.util.List;
 public record ResourceDescription(
         String name,
         List<KeyViolation> keyViolations,
-        List<ColumnDescription> columnDescriptions,
+        List<ColumnAnalysis> columnAnalyses,
         long totalRows
 
 ) {

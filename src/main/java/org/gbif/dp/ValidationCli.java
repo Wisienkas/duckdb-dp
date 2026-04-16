@@ -3,19 +3,21 @@ package org.gbif.dp;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import ch.qos.logback.classic.Level;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.gbif.dp.analysis.AnalysisFeature;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.CustomDuckDbConfig;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
-import org.gbif.dp.analysis.DataPackageValidator;
+import org.gbif.dp.analysis.DataPackageAnalyser;
 import org.gbif.dp.analysis.model.DataTypeViolation;
-import org.gbif.dp.analysis.DuckDbDataPackageAnalyzer;
+import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
 import org.gbif.dp.analysis.model.KeyViolation;
 import org.gbif.dp.analysis.ValidationOptions;
-import org.gbif.dp.analysis.model.ValidationResult;
+import org.gbif.dp.analysis.model.DatapackageAnalysisResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -49,12 +51,15 @@ public class ValidationCli {
                 arguments.duckdbTempDir,
                 arguments.duckdbMaxTemp);
 
-        DataPackageValidator validator = new DuckDbDataPackageAnalyzer(
+        DataPackageAnalyser validator = new DuckDbDataPackageAnalyser(
                 new JacksonDataPackageParser(),
                 new DuckDbResourceLoader());
         ValidationOptions defaultOptions = ValidationOptions.defaults();
         ValidationOptions validationOptions = new ValidationOptions(defaultOptions.sampleSize(), defaultOptions.jdbcUrl(), customDuckDbConfig);
-        ValidationResult result = validator.validate(Path.of(args[0]), validationOptions);
+        List<AnalysisFeature> analysisFeatures = List.of(
+        );
+
+        DatapackageAnalysisResult result = validator.analyse(Path.of(args[0]), validationOptions, analysisFeatures);
 
         if (result.isValid()) {
             System.out.println("All validations passed.");
@@ -81,7 +86,7 @@ public class ValidationCli {
         System.exit(2);
     }
 
-    private static void printResult(ValidationResult result, Instant startTimer) throws JsonProcessingException {
+    private static void printResult(DatapackageAnalysisResult result, Instant startTimer) throws JsonProcessingException {
         ObjectMapper objectMapper = new ObjectMapper();
         String resultAsString = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(result);
         System.out.println(resultAsString);
