@@ -4,10 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.gbif.dp.analysis.model.ColumnStatistics;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
 import org.gbif.dp.analysis.model.DataTypeViolation;
@@ -128,30 +130,7 @@ class DuckDbDataPackageAnalyserTest {
 
   @Test
   void shouldPassWhenAllTypesAreCorrect() throws Exception {
-    Path tempDir = Files.createTempDirectory("dp-dtype-pass-");
-
-    Files.writeString(
-        tempDir.resolve("data.csv"),
-        "id,score\n1,3.14\n2,2.71\n");
-    Files.writeString(
-        tempDir.resolve("datapackage.json"),
-        """
-        {
-          "name": "clean",
-          "resources": [
-            {
-              "name": "data",
-              "path": "data.csv",
-              "schema": {
-                "fields": [
-                  { "name": "id",    "type": "integer" },
-                  { "name": "score", "type": "number" }
-                ]
-              }
-            }
-          ]
-        }
-        """);
+    Path tempDir = setupSmallValidDataset();
 
     DataPackageAnalyser validator =
         new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
@@ -162,6 +141,81 @@ class DuckDbDataPackageAnalyserTest {
             AnalysisFeature.ALL_FEATURES);
 
     assertTrue(result.isValid());
+  }
+
+  @Test
+  void shouldHaveJustTwoLines() throws Exception {
+    Path tempDir = setupSmallValidDataset();
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.COUNT, AnalysisFeature.COUNT_DISTINCT));
+
+    ResourceAnalysisResult resourceAnalysisResult = result.resourceAnalysisResults().stream()
+            .filter(rar -> rar.name().equalsIgnoreCase("data"))
+            .findFirst().orElseThrow(() -> new AssertionError("Unable to find resourceAnalysisResult for Resource[data]"));
+
+    ColumnStatistics columnStatistics = resourceAnalysisResult.columnAnalyses().stream()
+            .filter(c -> c.name().equalsIgnoreCase("score"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("Unable to find [data]['score'] column"));
+
+    assertEquals(3, resourceAnalysisResult.totalRows());
+    assertEquals(3, columnStatistics.populatedValues());
+    assertEquals(2, columnStatistics.uniqueValues());
+
+  }
+  @Test
+  void shouldOnlyCalculateChoosenFeatures() throws Exception {
+    Path tempDir = setupSmallValidDataset();
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.DATA_TYPE_CONSTRAINT));
+
+      assertTrue(
+              result.resourceAnalysisResults().stream()
+                .allMatch(rar -> rar.columnAnalyses().isEmpty()),
+              "No counting etc for any of the data files");
+  }
+
+  private static Path setupSmallValidDataset() throws IOException {
+    Path tempDir = Files.createTempDirectory("dp-dtype-pass-");
+
+    Files.writeString(
+            tempDir.resolve("data.csv"),
+            "id,score\n" +
+                    "1,3.14\n" +
+                    "2,2.71\n" +
+                    "3,2.71\n");
+    Files.writeString(
+            tempDir.resolve("datapackage.json"),
+            """
+            {
+              "name": "clean",
+              "resources": [
+                {
+                  "name": "data",
+                  "path": "data.csv",
+                  "schema": {
+                    "fields": [
+                      { "name": "id",    "type": "integer" },
+                      { "name": "score", "type": "number" }
+                    ]
+                  }
+                }
+              ]
+            }
+            """);
+    return tempDir;
   }
 }
 

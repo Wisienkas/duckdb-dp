@@ -7,4 +7,5 @@ public record ResourceDescriptor(
     String name,
     List<Path> paths,
     List<FieldDescriptor> fields,
-    List<ForeignKeyDescriptor> foreignKeys) {}
+    List<ForeignKeyDescriptor> foreignKeys,
+    PrimaryKeyDescriptor primaryKey) {}

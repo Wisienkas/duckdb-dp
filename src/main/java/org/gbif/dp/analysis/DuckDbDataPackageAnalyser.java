@@ -51,27 +51,22 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
       }
 
       List<ResourceAnalysisResult> resourceAnalysisResults = analyseEachResource(options, analysisFeatures, dataPackageDescriptor, connection);
-      List<DataTypeViolation> dataTypeViolations = analyseDatapackageIntegrity(options, analysisFeatures, dataPackageDescriptor, connection);
 
       return new DatapackageAnalysisResult(
-             List.copyOf(resourceAnalysisResults),
-             List.copyOf(dataTypeViolations)
+             List.copyOf(resourceAnalysisResults)
       );
     }
   }
 
-  private List<DataTypeViolation> analyseDatapackageIntegrity(
+  private List<DataTypeViolation> analyseDataTypeViolations(
           ValidationOptions options,
-          List<AnalysisFeature> analysisFeatures,
           DataPackageDescriptor dataPackageDescriptor,
           Connection connection)
           throws SQLException {
     List<DataTypeViolation> dataTypeViolations = new ArrayList<>();
-    if (analysisFeatures.contains(AnalysisFeature.DATAPACKAGE_VALIDATION)) {
-      // Data type validation
-      for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
-        dataTypeViolations.addAll(dataTypeValidator.validate(connection, resource, options.sampleSize()));
-      }
+    // Data type validation
+    for (ResourceDescriptor resource : dataPackageDescriptor.resources()) {
+      dataTypeViolations.addAll(dataTypeValidator.validate(connection, resource, options.sampleSize()));
     }
     return dataTypeViolations;
   }
@@ -117,18 +112,28 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
                                Connection connection,
                                DataPackageDescriptor dataPackageDescriptor,
                                List<AnalysisFeature> analysisFeatures) throws SQLException {
-    List<KeyViolation> keyViolations = new ArrayList<>();
-    List<ColumnAnalysis> columnAnalyses = new ArrayList<>();
+    List<ForeignKeyViolation> keyViolations = new ArrayList<>();
+    List<DataTypeViolation> dataTypeViolations = new ArrayList<>();
+    List<ColumnStatistics> columnAnalyses = new ArrayList<>();
+    PrimaryKeyViolation primaryKeyViolation = null;
     long rowCount = countRows(connection, resource);
 
     if (analysisFeatures.contains(AnalysisFeature.FOREIGN_KEY_CONSTRAINT)) {
-      List<KeyViolation> foreignKeyViolations = findForeignKeyViolations(options, resource, connection, dataPackageDescriptor);
-      keyViolations.addAll(foreignKeyViolations);
+      List<ForeignKeyViolation> foreignForeignKeyViolations = findForeignKeyViolations(options, resource, connection, dataPackageDescriptor);
+      keyViolations.addAll(foreignForeignKeyViolations);
+    }
+
+    if (analysisFeatures.contains(AnalysisFeature.PRIMARY_KEY_UNIQUE)) {
+      primaryKeyViolation = findPrimaryKeyViolations(options, resource, connection, dataPackageDescriptor);
+    }
+
+    if (analysisFeatures.contains(AnalysisFeature.DATA_TYPE_CONSTRAINT)) {
+      dataTypeViolations = analyseDataTypeViolations(options, dataPackageDescriptor, connection);
     }
 
     if (analysisFeatures.contains(AnalysisFeature.COUNT) || analysisFeatures.contains(AnalysisFeature.COUNT_DISTINCT)) {
       for (var field : resource.fields()) {
-        ColumnAnalysis columnAnalysis = analyseColumn(connection, field, resource);
+        ColumnStatistics columnAnalysis = analyseColumn(connection, field, resource);
         columnAnalyses.add(columnAnalysis);
       }
     }
@@ -136,16 +141,57 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
     return new ResourceAnalysisResult(
             resource.name(),
             keyViolations,
+            primaryKeyViolation,
+            dataTypeViolations,
             columnAnalyses,
             rowCount);
   }
 
-  private List<KeyViolation> findForeignKeyViolations(
+    private PrimaryKeyViolation findPrimaryKeyViolations(ValidationOptions options, ResourceDescriptor resource, Connection connection, DataPackageDescriptor dataPackageDescriptor) throws SQLException {
+      if (resource.primaryKey() == null) {
+        return null;
+      }
+      String keyFields = resource.primaryKey().keys().stream()
+              .map(key -> q(key))
+              .collect(Collectors.joining(", "));
+
+      StringBuilder sb = new StringBuilder();
+      sb.append("SELECT COUNT(*), ").append(keyFields);
+      sb.append(" FROM ").append(q(resource.name()));
+      sb.append(" GROUP BY ").append(keyFields);
+      sb.append(" HAVING COUNT(*) > 1");
+
+      String violationSql = sb.toString();
+
+      sb = new StringBuilder();
+      sb.append("SELECT COUNT(*)");
+      sb.append(" FROM (").append(violationSql).append(")");
+
+      String countSql = sb.toString();
+      String sampleSql = violationSql + " LIMIT " + options.sampleSize();
+
+      log.debug("Primary key violation search query: " + violationSql);
+
+      long count;
+      try (PreparedStatement statement = connection.prepareStatement(countSql);
+           ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        count = resultSet.getLong(1);
+      }
+
+      if (count == 0) {
+        return null;
+      }
+      List<Map<String, Object>> samples = fetchSampleRows(connection, sampleSql);
+      return new PrimaryKeyViolation(resource.name(), resource.primaryKey().keys(), count, samples);
+    }
+
+  private List<ForeignKeyViolation> findForeignKeyViolations(
           ValidationOptions options,
           ResourceDescriptor resource,
           Connection connection,
           DataPackageDescriptor dataPackageDescriptor) throws SQLException {
-    List<KeyViolation> keyViolations = new ArrayList<>();
+    List<ForeignKeyViolation> foreignKeyViolations = new ArrayList<>();
     for (ForeignKeyDescriptor key : resource.foreignKeys()) {
       log.info("Checking referential integrity for {}[{}]->{}[{}]",
               resource.name(),
@@ -153,13 +199,13 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
               key.reference().resource(),
               String.join(",", key.reference().fields())
       );
-      KeyViolation violation =
+      ForeignKeyViolation violation =
               validateForeignKey(connection, dataPackageDescriptor, resource, key, options.sampleSize());
       if (violation.violationCount() > 0) {
-        keyViolations.add(violation);
+        foreignKeyViolations.add(violation);
       }
     }
-    return keyViolations;
+    return foreignKeyViolations;
   }
 
   private long countRows(Connection connection, ResourceDescriptor resource) throws SQLException {
@@ -171,7 +217,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
       }
     }
 
-  private ColumnAnalysis analyseColumn(
+  private ColumnStatistics analyseColumn(
             Connection connection,
             FieldDescriptor field,
             ResourceDescriptor resource)
@@ -181,7 +227,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
       try (PreparedStatement statement = connection.prepareStatement(sql);
            ResultSet resultSet = statement.executeQuery()) {
         resultSet.next();
-        ColumnAnalysis columnAnalysis = new ColumnAnalysis(
+        ColumnStatistics columnAnalysis = new ColumnStatistics(
                 field.name(),
                 resultSet.getLong(1),
                 resultSet.getLong(2));
@@ -199,7 +245,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
         return sb.toString();
     }
 
-  private KeyViolation validateForeignKey(
+  private ForeignKeyViolation validateForeignKey(
       Connection connection,
       DataPackageDescriptor dataPackage,
       ResourceDescriptor resource,
@@ -211,28 +257,10 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
     String parentName = reference.resource().isBlank() ? resource.name() : reference.resource();
     ResourceDescriptor parentResource = dataPackage.resourcesByName().get(parentName);
     if (parentResource == null) {
-      return new KeyViolation(resource.name(), key.fields(), parentName, reference.fields(), 0L, List.of());
+      return new ForeignKeyViolation(resource.name(), key.fields(), parentName, reference.fields(), 0L, List.of());
     }
 
     String countSql = buildViolationCountSql(resource.name(), key.fields(), parentResource.name(), reference.fields());
-    String fullCountSql = buildCountQuerySql(resource.name(), key.fields());
-    try (PreparedStatement statement = connection.prepareStatement(fullCountSql);
-         ResultSet resultSet = statement.executeQuery()) {
-      resultSet.next();
-
-      StringBuilder sb = new StringBuilder()
-              .append("counting rows and relevant rows for ")
-              .append(resource.name())
-              .append("(").append(resultSet.getLong(1)).append(")")
-              .append("[");
-      for (int i = 0; i < key.fields().size(); i++) {
-        String fieldName = key.fields().get(i);
-        Long count = resultSet.getLong(i + 2);
-        sb.append("{ ").append(fieldName).append(" -> ").append(count).append("}");
-      }
-
-      log.info(sb.toString());
-    }
 
     long count;
     try (PreparedStatement statement = connection.prepareStatement(countSql);
@@ -244,9 +272,9 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
     List<Map<String, Object>> samples =
         count == 0
             ? List.of()
-            : fetchSampleRows(connection, resource.name(), key.fields(), parentResource.name(), reference.fields(), sampleSize);
+            : fetchForeignKeySampleRows(connection, resource.name(), key.fields(), parentResource.name(), reference.fields(), sampleSize);
 
-    return new KeyViolation(
+    return new ForeignKeyViolation(
         resource.name(), key.fields(), parentResource.name(), reference.fields(), count, samples);
   }
 
@@ -261,7 +289,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
               q(name);
     }
 
-  private List<Map<String, Object>> fetchSampleRows(
+  private List<Map<String, Object>> fetchForeignKeySampleRows(
       Connection connection,
       String childResource,
       List<String> childFields,
@@ -271,9 +299,14 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
       throws SQLException {
 
     String sql = buildSampleSql(childResource, childFields, parentResource, parentFields, sampleSize);
+    List<Map<String, Object>> sampleRows = fetchSampleRows(connection, sql);
+    return List.copyOf(sampleRows);
+  }
+
+  private static List<Map<String, Object>> fetchSampleRows(Connection connection, String sql) throws SQLException {
     List<Map<String, Object>> sampleRows = new ArrayList<>();
     try (PreparedStatement statement = connection.prepareStatement(sql);
-        ResultSet resultSet = statement.executeQuery()) {
+         ResultSet resultSet = statement.executeQuery()) {
       ResultSetMetaData metaData = resultSet.getMetaData();
       while (resultSet.next()) {
         Map<String, Object> row = new HashMap<>();
@@ -283,7 +316,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
         sampleRows.add(row);
       }
     }
-    return List.copyOf(sampleRows);
+    return sampleRows;
   }
 
   private static String buildViolationCountSql(

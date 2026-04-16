@@ -63,13 +63,22 @@ public class JacksonDataPackageParser implements DataPackageParser {
       JsonNode schemaNode = resourceNode.path("schema");
       List<FieldDescriptor> fields = parseFields(schemaNode.path("fields"));
       List<ForeignKeyDescriptor> foreignKeys = parseForeignKeys(schemaNode.path("foreignKeys"));
-      ResourceDescriptor descriptor = new ResourceDescriptor(name, paths, fields, foreignKeys);
+      PrimaryKeyDescriptor primaryKey = parsePrimaryKey(schemaNode.path("primaryKey"));
+      ResourceDescriptor descriptor = new ResourceDescriptor(name, paths, fields, foreignKeys, primaryKey);
       resources.add(descriptor);
       byName.put(name, descriptor);
     }
 
     return new DataPackageDescriptor(packageName, List.copyOf(resources), Map.copyOf(byName));
   }
+
+    private PrimaryKeyDescriptor parsePrimaryKey(JsonNode node) {
+      List<String> keys = normalizeToList(node);
+      if (keys.isEmpty()) {
+        return null;
+      }
+      return new PrimaryKeyDescriptor(keys);
+    }
 
   private static List<FieldDescriptor> parseFields(JsonNode fieldsNode) {
     if (!fieldsNode.isArray()) {

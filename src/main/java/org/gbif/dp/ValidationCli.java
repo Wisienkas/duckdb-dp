@@ -15,7 +15,7 @@ import org.gbif.dp.duckdb.DuckDbResourceLoader;
 import org.gbif.dp.analysis.DataPackageAnalyser;
 import org.gbif.dp.analysis.model.DataTypeViolation;
 import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
-import org.gbif.dp.analysis.model.KeyViolation;
+import org.gbif.dp.analysis.model.ForeignKeyViolation;
 import org.gbif.dp.analysis.ValidationOptions;
 import org.gbif.dp.analysis.model.DatapackageAnalysisResult;
 import org.slf4j.Logger;
@@ -68,7 +68,7 @@ public class ValidationCli {
             return;
         }
 
-        for (KeyViolation v : result.keyViolations()) {
+        for (ForeignKeyViolation v : result.keyViolations()) {
             System.out.printf("FK violation: %s(%s) -> %s(%s), count=%d%n", v.resource(), String.join(",", v.fields()), v.referenceResource(), String.join(",", v.referenceFields()), v.violationCount());
             for (var sample : v.sampleRows()) {
                 System.out.println("  sample=" + sample);
