@@ -187,6 +187,11 @@ class DuckDbDataPackageAnalyserTest {
               "No counting etc for any of the data files");
   }
 
+  @Test
+  void shouldFailOnDuplicatePrimaryKeys() {
+
+  }
+
   private static Path setupSmallValidDataset() throws IOException {
     Path tempDir = Files.createTempDirectory("dp-dtype-pass-");
 
