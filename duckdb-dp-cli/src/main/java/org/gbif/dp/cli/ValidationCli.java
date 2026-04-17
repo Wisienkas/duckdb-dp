@@ -1,26 +1,26 @@
-package org.gbif.dp;
-
-import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
+package org.gbif.dp.cli;
 
 import ch.qos.logback.classic.Level;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.gbif.dp.analysis.AnalysisFeature;
+import org.gbif.dp.analysis.DataPackageAnalyser;
+import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
+import org.gbif.dp.analysis.ValidationOptions;
+import org.gbif.dp.analysis.model.DataTypeViolation;
+import org.gbif.dp.analysis.model.DatapackageAnalysisResult;
+import org.gbif.dp.analysis.model.ForeignKeyViolation;
 import org.gbif.dp.descriptor.JacksonDataPackageParser;
 import org.gbif.dp.duckdb.CustomDuckDbConfig;
 import org.gbif.dp.duckdb.DuckDbResourceLoader;
-import org.gbif.dp.analysis.DataPackageAnalyser;
-import org.gbif.dp.analysis.model.DataTypeViolation;
-import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
-import org.gbif.dp.analysis.model.ForeignKeyViolation;
-import org.gbif.dp.analysis.ValidationOptions;
-import org.gbif.dp.analysis.model.DatapackageAnalysisResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 
 public class ValidationCli {
 

@@ -1,6 +1,8 @@
-package org.gbif.dp;
+package org.gbif.dp.cli;
 
-import picocli.CommandLine.*;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 
 @Command(name = "app", mixinStandardHelpOptions = true)
 public class Config implements Runnable {
