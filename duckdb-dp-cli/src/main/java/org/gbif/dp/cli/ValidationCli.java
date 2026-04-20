@@ -3,7 +3,6 @@ package org.gbif.dp.cli;
 import ch.qos.logback.classic.Level;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.gbif.dp.analysis.AnalysisFeature;
 import org.gbif.dp.analysis.DataPackageAnalyser;
 import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
 import org.gbif.dp.analysis.ValidationOptions;
@@ -20,7 +19,9 @@ import picocli.CommandLine;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ValidationCli {
 
@@ -43,6 +44,7 @@ public class ValidationCli {
         } else {
             Logging.setRootLevel(Level.INFO);
         }
+
         Instant startTimer = Instant.now();
 
         CustomDuckDbConfig customDuckDbConfig = new CustomDuckDbConfig(
@@ -55,42 +57,58 @@ public class ValidationCli {
                 new JacksonDataPackageParser(),
                 new DuckDbResourceLoader());
         ValidationOptions defaultOptions = ValidationOptions.defaults();
-        ValidationOptions validationOptions = new ValidationOptions(defaultOptions.sampleSize(), defaultOptions.jdbcUrl(), customDuckDbConfig);
-        List<AnalysisFeature> analysisFeatures = List.of(
-        );
+        ValidationOptions validationOptions = new ValidationOptions(
+                defaultOptions.sampleSize(), defaultOptions.jdbcUrl(), customDuckDbConfig);
 
-        DatapackageAnalysisResult result = validator.analyse(Path.of(args[0]), validationOptions, analysisFeatures);
+        DatapackageAnalysisResult result = validator.analyse(
+                Path.of(args[0]), validationOptions, List.of());
 
+        Duration duration = Duration.between(startTimer, Instant.now());
+
+        if (arguments.outputFormat == Config.OutputFormat.JSON) {
+            printJson(result, duration);
+        } else {
+            printText(result, duration);
+        }
+
+        if (!result.isValid()) {
+            System.exit(2);
+        }
+    }
+
+    private static void printJson(DatapackageAnalysisResult result, Duration duration) throws JsonProcessingException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        // Wrap result + duration together so duration is part of the JSON output
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("result", result);
+        output.put("durationSeconds", duration.toSeconds());
+        System.out.println(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(output));
+    }
+
+    private static void printText(DatapackageAnalysisResult result, Duration duration) {
         if (result.isValid()) {
             System.out.println("All validations passed.");
-
-            printResult(result, startTimer);
-            return;
         }
 
         for (ForeignKeyViolation v : result.keyViolations()) {
-            System.out.printf("FK violation: %s(%s) -> %s(%s), count=%d%n", v.resource(), String.join(",", v.fields()), v.referenceResource(), String.join(",", v.referenceFields()), v.violationCount());
+            System.out.printf("FK violation: %s(%s) -> %s(%s), count=%d%n",
+                    v.resource(), String.join(",", v.fields()),
+                    v.referenceResource(), String.join(",", v.referenceFields()),
+                    v.violationCount());
             for (var sample : v.sampleRows()) {
                 System.out.println("  sample=" + sample);
             }
         }
 
         for (DataTypeViolation v : result.dataTypeViolations()) {
-            System.out.printf("Type violation: %s.%s declared as '%s', count=%d%n", v.resource(), v.field(), v.declaredType(), v.violationCount());
+            System.out.printf("Type violation: %s.%s declared as '%s', count=%d%n",
+                    v.resource(), v.field(), v.declaredType(), v.violationCount());
             for (String sample : v.sampleValues()) {
                 System.out.println("  bad value: " + sample);
             }
         }
 
-        printResult(result, startTimer);
-        System.exit(2);
-    }
-
-    private static void printResult(DatapackageAnalysisResult result, Instant startTimer) throws JsonProcessingException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        String resultAsString = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(result);
-        System.out.println(resultAsString);
-        Duration duration = Duration.between(startTimer, Instant.now());
-        System.out.printf("duration: %02d:%02d:%02d %n", duration.toHoursPart(), duration.toMinutesPart(), duration.toSecondsPart());
+        System.out.printf("duration: %02d:%02d:%02d%n",
+                duration.toHoursPart(), duration.toMinutesPart(), duration.toSecondsPart());
     }
 }

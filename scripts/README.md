@@ -21,7 +21,7 @@ The pipeline consists of 3 main steps:
 
 ---
 
-## 1. Running the JAR
+## 1. Running the JAR with monitoring
 
 Each run produces a log folder with:
 
@@ -33,9 +33,7 @@ Each run produces a log folder with:
 ### Example
 
 ```bash
-java -jar your-app.jar \
-  --dataDir ../data/dwc-dp-parquet \
-  --logDir ../log
+./run.sh logs/ /path/to/data/dir duckdb-dp-cli/target/duckdb-dp-cli-1.0-SNAPSHOT-runner.jar
 ```
 
 This will produce a run folder like:
@@ -212,21 +210,17 @@ out/
 
 ---
 
-
 ## TL;DR
 
 ```bash
-
-# 0. Create Jar file
+# 0. Build
 mvn clean package
 
-# 1. Run app → produces logs
-java -jar ../target/duckdb-dp-1.0-SNAPSHOT.jar \
-  --dataDir data/dwc-dp-parquet \
-  --logDir log
+# 1. Run via profiling script (produces logs, GC, pidstat, vmstat)
+./run.sh logs/ /path/to/data/dir duckdb-dp-cli/target/duckdb-dp-cli-1.0-SNAPSHOT-runner.jar
 
 # 2. Convert logs
-python parse_runs_to_parquet.py ../log -o out/all_runs.parquet
+python parse_runs_to_parquet.py logs/ -o out/all_runs.parquet
 
 # 3. Analyze
 duckdb analysis.db
@@ -235,3 +229,6 @@ duckdb analysis.db
 # 4. Query
 SELECT * FROM run_comparison_simple;
 ```
+
+The script creates a timestamped run directory under `<base_log_dir>` and symlinks `latest/` to it.
+DuckDB tuning (`DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS`, etc.) can be overridden via env vars before calling the script.
