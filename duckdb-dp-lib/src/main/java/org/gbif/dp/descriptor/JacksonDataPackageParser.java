@@ -61,7 +61,11 @@ public class JacksonDataPackageParser implements DataPackageParser {
       }
 
       JsonNode schemaNode = resourceNode.path("schema");
-      List<FieldDescriptor> fields = parseFields(schemaNode.path("fields"));
+      List<MissingValueDescriptor> defaultMissingValues = parseMissingValues(
+              schemaNode.path("MissingValues"),
+              MissingValueDescriptor.Source.SCHEMA,
+              List.of(MissingValueDescriptor.NULL));
+      List<FieldDescriptor> fields = parseFields(schemaNode.path("fields"), defaultMissingValues);
       List<ForeignKeyDescriptor> foreignKeys = parseForeignKeys(schemaNode.path("foreignKeys"));
       PrimaryKeyDescriptor primaryKey = parsePrimaryKey(schemaNode.path("primaryKey"));
       ResourceDescriptor descriptor = new ResourceDescriptor(name, paths, fields, foreignKeys, primaryKey);
@@ -72,7 +76,20 @@ public class JacksonDataPackageParser implements DataPackageParser {
     return new DataPackageDescriptor(packageName, List.copyOf(resources), Map.copyOf(byName));
   }
 
-    private PrimaryKeyDescriptor parsePrimaryKey(JsonNode node) {
+    private static List<MissingValueDescriptor> parseMissingValues(
+            JsonNode node,
+            MissingValueDescriptor.Source source,
+            List<MissingValueDescriptor> defaultValues) {
+        List<String> missingValues = normalizeToList(node);
+        if (missingValues.isEmpty()) {
+          return List.copyOf(defaultValues);
+        }
+        return missingValues.stream()
+                .map(str -> new MissingValueDescriptor(str, source))
+                .toList();
+    }
+
+  private PrimaryKeyDescriptor parsePrimaryKey(JsonNode node) {
       List<String> keys = normalizeToList(node);
       if (keys.isEmpty()) {
         return null;
@@ -80,7 +97,7 @@ public class JacksonDataPackageParser implements DataPackageParser {
       return new PrimaryKeyDescriptor(keys);
     }
 
-  private static List<FieldDescriptor> parseFields(JsonNode fieldsNode) {
+  private static List<FieldDescriptor> parseFields(JsonNode fieldsNode, List<MissingValueDescriptor> defaultMissingValues) {
     if (!fieldsNode.isArray()) {
       return List.of();
     }
@@ -90,8 +107,10 @@ public class JacksonDataPackageParser implements DataPackageParser {
       String fieldName = fieldNode.path("name").asText("").trim();
       String fieldType = fieldNode.path("type").asText("string").trim();
       String fieldFormat = fieldNode.path("format").asText("default").trim();
+      List<MissingValueDescriptor> missingValues = parseMissingValues(
+                fieldNode.path("missingValues"), MissingValueDescriptor.Source.FIELD, defaultMissingValues);
       if (!fieldName.isBlank()) {
-        fields.add(new FieldDescriptor(fieldName, fieldType, fieldFormat));
+        fields.add(new FieldDescriptor(fieldName, fieldType, fieldFormat, missingValues));
       }
     }
     return List.copyOf(fields);

@@ -222,5 +222,13 @@ class DuckDbDataPackageAnalyserTest {
             """);
     return tempDir;
   }
+
+  @Test
+  void shouldNotReQuoteAlreadyQouted() {
+    String value = "\"field\"";
+    String reqouted = DuckDbDataPackageAnalyser.q(value);
+
+    assertEquals(value, reqouted, "Expect multiple repeated invocations of qouting to have no effect");
+  }
 }
 
