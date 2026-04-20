@@ -3,6 +3,10 @@ package org.gbif.dp.analysis;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -251,20 +255,53 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
     }
 
     private String createMissingValueWhereSql(FieldDescriptor fieldDescriptor) {
-        if (fieldDescriptor.missingValues().isEmpty()) {
-            return "";
+        List<String> castableMissingValues = fieldDescriptor.missingValues().stream()
+                .filter(mv -> !mv.rawValue().isEmpty()) // skip "" — always valid as null, no SQL needed
+                .filter(mv -> castable(mv.rawValue(), fieldDescriptor.type()))
+                .map(mv -> sq(mv.rawValue()))
+                .toList();
+
+        if (castableMissingValues.isEmpty()) {
+            return "1 = 1";
         }
 
-        if (fieldDescriptor.missingValues().size() == 1 ) {
-            return "";
-        }
+        return " " + q(fieldDescriptor.name()) + " not in ("
+                + String.join(", ", castableMissingValues) + ")";
+    }
 
-        StringBuilder sb = new StringBuilder();
-        String missingValues = fieldDescriptor.missingValues().stream()
-                .map(missingValueDescriptor -> sq(missingValueDescriptor.rawValue()))
-                .collect(Collectors.joining(", "));
-        sb.append(" ").append(q(fieldname)).append(" not in (").append(missingValues).append(")");
-        return sb.toString();
+    private boolean castable(String rawValue, String frictionlessType) {
+        if (rawValue == null || rawValue.isEmpty()) return true;
+        return switch (frictionlessType) {
+            case "integer", "year" -> {
+                try { Long.parseLong(rawValue); yield true; }
+                catch (NumberFormatException e) { yield false; }
+            }
+            case "number" -> {
+                try { Double.parseDouble(rawValue); yield true; }
+                catch (NumberFormatException e) { yield false; }
+            }
+            case "boolean" ->
+                    rawValue.equalsIgnoreCase("true") || rawValue.equalsIgnoreCase("false");
+            case "date" -> {
+                try { LocalDate.parse(rawValue); yield true; }
+                catch (DateTimeParseException e) { yield false; }
+            }
+            case "datetime" -> {
+                try { LocalDateTime.parse(rawValue); yield true; }
+                catch (DateTimeParseException e) { yield false; }
+            }
+            case "time" -> {
+                try { LocalTime.parse(rawValue); yield true; }
+                catch (DateTimeParseException e) { yield false; }
+            }
+            case "object", "array" -> {
+                // Rough JSON check — adjust if you have a JSON lib available
+                String v = rawValue.trim();
+                yield (frictionlessType.equals("object") && v.startsWith("{") && v.endsWith("}"))
+                        || (frictionlessType.equals("array")  && v.startsWith("[") && v.endsWith("]"));
+            }
+            default -> true; // string and unknown types accept anything
+        };
     }
 
     private ForeignKeyViolation validateForeignKey(
@@ -404,7 +441,7 @@ public class DuckDbDataPackageAnalyser implements DataPackageAnalyser {
     }
 
     static String q(String identifier) {
-        if (identifier.length() < 2
+        if (identifier.length() > 2
                 && identifier.substring(0, 1).equalsIgnoreCase("\"")
                 && identifier.substring(identifier.length() - 1).equalsIgnoreCase("\"")
         ) {

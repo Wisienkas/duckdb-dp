@@ -62,7 +62,7 @@ public class JacksonDataPackageParser implements DataPackageParser {
 
       JsonNode schemaNode = resourceNode.path("schema");
       List<MissingValueDescriptor> defaultMissingValues = parseMissingValues(
-              schemaNode.path("MissingValues"),
+              schemaNode.path("missingValues"),
               MissingValueDescriptor.Source.SCHEMA,
               List.of(MissingValueDescriptor.NULL));
       List<FieldDescriptor> fields = parseFields(schemaNode.path("fields"), defaultMissingValues);

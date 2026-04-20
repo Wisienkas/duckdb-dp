@@ -24,7 +24,7 @@ public class DuckDbDataTypeValidator {
    * Types not present here are skipped (e.g. "string" always passes,
    * "geopoint" / "geojson" need custom logic).
    */
-  private static final Map<String, String> FRICTIONLESS_TO_DUCKDB = Map.ofEntries(
+  public static final Map<String, String> FRICTIONLESS_TO_DUCKDB = Map.ofEntries(
       Map.entry("integer",  "BIGINT"),
       Map.entry("number",   "DOUBLE"),
       Map.entry("boolean",  "BOOLEAN"),

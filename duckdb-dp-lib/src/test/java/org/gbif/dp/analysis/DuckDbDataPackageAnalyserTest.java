@@ -230,5 +230,192 @@ class DuckDbDataPackageAnalyserTest {
 
     assertEquals(value, reqouted, "Expect multiple repeated invocations of qouting to have no effect");
   }
+
+  @Test
+  void shouldNotCountFieldLevelMissingValuesAsPopulated() throws Exception {
+    Path tempDir = Files.createTempDirectory("dp-missing-field-");
+
+    Files.writeString(
+            tempDir.resolve("data.csv"),
+            "id,score\n1,3.14\n-1,2.71\n3,-1\n");
+    Files.writeString(
+            tempDir.resolve("datapackage.json"),
+            """
+            {
+              "name": "missing-field",
+              "resources": [
+                {
+                  "name": "data",
+                  "path": "data.csv",
+                  "schema": {
+                    "fields": [
+                      { "name": "id",    "type": "integer", "missingValues": ["-1"] },
+                      { "name": "score", "type": "number",  "missingValues": ["-1"] }
+                    ]
+                  }
+                }
+              ]
+            }
+            """);
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.COUNT, AnalysisFeature.COUNT_DISTINCT));
+
+    ColumnStatistics idStats = getColumnStats(result, "data", "id");
+    ColumnStatistics scoreStats = getColumnStats(result, "data", "score");
+
+    // Row 2 has "NA" for id, row 3 has "-1" for score — both should be treated as null
+    assertEquals(2, idStats.populatedValues(),    "id: '-1' is missing, so only rows 1 and 3 count");
+    assertEquals(2, scoreStats.populatedValues(), "score: '-1' is missing, so only rows 1 and 2 count");
+    assertEquals(2, idStats.uniqueValues(),       "id: 1 and 3");
+    assertEquals(2, scoreStats.uniqueValues(),    "score: 3.14 and 2.71");
+  }
+
+  @Test
+  void shouldFallBackToSchemaMissingValuesWhenFieldDoesNotDefineOwn() throws Exception {
+    Path tempDir = Files.createTempDirectory("dp-missing-schema-");
+
+    Files.writeString(
+            tempDir.resolve("data.csv"),
+            "id,score\n1,3.14\n2,-1\n3,2.71\n");
+    Files.writeString(
+            tempDir.resolve("datapackage.json"),
+            """
+            {
+              "name": "missing-schema",
+              "resources": [
+                {
+                  "name": "data",
+                  "path": "data.csv",
+                  "schema": {
+                    "missingValues": ["-1"],
+                    "fields": [
+                      { "name": "id",    "type": "integer" },
+                      { "name": "score", "type": "number"  }
+                    ]
+                  }
+                }
+              ]
+            }
+            """);
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.COUNT, AnalysisFeature.COUNT_DISTINCT));
+
+    ColumnStatistics scoreStats = getColumnStats(result, "data", "score");
+
+    assertEquals(2, scoreStats.populatedValues(), "score: '-1' inherited from schema counts as missing");
+    assertEquals(2, scoreStats.uniqueValues());
+  }
+
+  @Test
+  void shouldPreferFieldMissingValuesOverSchemaMissingValues() throws Exception {
+    Path tempDir = Files.createTempDirectory("dp-missing-precedence-");
+
+    // "-999" is declared missing at schema level
+    // "-1" is declared missing at field level for score — so "-999" should NOT be missing for score
+    Files.writeString(
+            tempDir.resolve("data.csv"),
+            "id,score\n1,3.14\n2,-1\n3,-999\n");
+    Files.writeString(
+            tempDir.resolve("datapackage.json"),
+            """
+            {
+              "name": "missing-precedence",
+              "resources": [
+                {
+                  "name": "data",
+                  "path": "data.csv",
+                  "schema": {
+                    "missingValues": ["-999"],
+                    "fields": [
+                      { "name": "id",    "type": "integer" },
+                      { "name": "score", "type": "number", "missingValues": ["-1"] }
+                    ]
+                  }
+                }
+              ]
+            }
+            """);
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.COUNT, AnalysisFeature.COUNT_DISTINCT));
+
+    ColumnStatistics idStats    = getColumnStats(result, "data", "id");
+    ColumnStatistics scoreStats = getColumnStats(result, "data", "score");
+
+    // id has no field-level override → inherits schema → "-999" is missing → rows 1 and 2 populated
+    assertEquals(3, idStats.populatedValues(),    "id: '-999' is missing via schema fallback");
+    // score has field-level override → only "-1" is missing → "-999" is a real value → rows 1 and 3 populated
+    assertEquals(2, scoreStats.populatedValues(), "score: '-1' is missing, but '-999' is a real value");
+    assertEquals(2, scoreStats.uniqueValues(),    "score: 3.14 and -999 are the two populated distinct values");
+  }
+
+  @Test
+  void shouldUseDefaultMissingValueOfEmptyStringWhenNeitherFieldNorSchemaDefinesMissingValues() throws Exception {
+    Path tempDir = Files.createTempDirectory("dp-missing-default-");
+
+    // No missingValues anywhere — only truly empty cells count as null
+    Files.writeString(
+            tempDir.resolve("data.csv"),
+            "id,score\n1,3.14\n2,-1\n3,\n");
+    Files.writeString(
+            tempDir.resolve("datapackage.json"),
+            """
+            {
+              "name": "missing-default",
+              "resources": [
+                {
+                  "name": "data",
+                  "path": "data.csv",
+                  "schema": {
+                    "fields": [
+                      { "name": "id",    "type": "integer" },
+                      { "name": "score", "type": "number"  }
+                    ]
+                  }
+                }
+              ]
+            }
+            """);
+
+    DataPackageAnalyser validator =
+            new DuckDbDataPackageAnalyser(new JacksonDataPackageParser(), new DuckDbResourceLoader());
+
+    DatapackageAnalysisResult result = validator.analyse(
+            tempDir.resolve("datapackage.json"),
+            ValidationOptions.defaults(),
+            List.of(AnalysisFeature.COUNT, AnalysisFeature.COUNT_DISTINCT));
+
+    ColumnStatistics scoreStats = getColumnStats(result, "data", "score");
+
+    // Row 3 is empty → null. Row 2 "-1" is not a declared missing value → populated (but fails type check)
+    assertEquals(2, scoreStats.populatedValues(), "score: empty cell is null, '-1' is a real (if invalid) value");
+  }
+
+  // Helper to avoid repetition
+  private static ColumnStatistics getColumnStats(DatapackageAnalysisResult result, String resource, String column) {
+    return result.resourceAnalysisResults().stream()
+            .filter(r -> r.name().equalsIgnoreCase(resource))
+            .findFirst().orElseThrow(() -> new AssertionError("Resource not found: " + resource))
+            .columnAnalyses().stream()
+            .filter(c -> c.name().equalsIgnoreCase(column))
+            .findFirst().orElseThrow(() -> new AssertionError("Column not found: " + column));
+  }
 }
 
