@@ -3,6 +3,7 @@ package org.gbif.dp.cli;
 import ch.qos.logback.classic.Level;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.gbif.dp.analysis.AnalysisFeature;
 import org.gbif.dp.analysis.DataPackageAnalyser;
 import org.gbif.dp.analysis.DuckDbDataPackageAnalyser;
 import org.gbif.dp.analysis.ValidationOptions;
@@ -27,14 +28,23 @@ public class ValidationCli {
 
     private static final Logger log = LoggerFactory.getLogger(ValidationCli.class);
 
+    private static final int EXIT_VALIDATION_SUCCESS = 0;
+    private static final int EXIT_PROGRAM_ERROR = 1;
+    private static final int EXIT_VALIDATION_ERROR = 2;
+
     public static void main(String[] args) throws Exception {
+        int exitCode = run(args);
+        System.exit(exitCode);
+    }
+
+    public static int run(String[] args) throws Exception {
         Config arguments = new Config();
         CommandLine commandLine = new CommandLine(arguments);
         commandLine.setCaseInsensitiveEnumValuesAllowed(true);
         int executed = commandLine.execute(args);
         if (executed != 0) {
             commandLine.printVersionHelp(System.err);
-            System.exit(1);
+            return EXIT_PROGRAM_ERROR;
         }
 
         if (arguments.quiet) {
@@ -61,7 +71,7 @@ public class ValidationCli {
                 defaultOptions.sampleSize(), defaultOptions.jdbcUrl(), customDuckDbConfig);
 
         DatapackageAnalysisResult result = validator.analyse(
-                Path.of(args[0]), validationOptions, List.of());
+                Path.of(args[0]), validationOptions, AnalysisFeature.ALL_FEATURES);
 
         Duration duration = Duration.between(startTimer, Instant.now());
 
@@ -72,8 +82,10 @@ public class ValidationCli {
         }
 
         if (!result.isValid()) {
-            System.exit(2);
+            return EXIT_VALIDATION_ERROR;
         }
+
+        return EXIT_VALIDATION_SUCCESS;
     }
 
     private static void printJson(DatapackageAnalysisResult result, Duration duration) throws JsonProcessingException {
@@ -90,7 +102,7 @@ public class ValidationCli {
             System.out.println("All validations passed.");
         }
 
-        for (ForeignKeyViolation v : result.keyViolations()) {
+        for (ForeignKeyViolation v : result.foreignKeyViolations()) {
             System.out.printf("FK violation: %s(%s) -> %s(%s), count=%d%n",
                     v.resource(), String.join(",", v.fields()),
                     v.referenceResource(), String.join(",", v.referenceFields()),

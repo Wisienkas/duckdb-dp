@@ -66,8 +66,8 @@ class DuckDbDataPackageAnalyserTest {
             AnalysisFeature.ALL_FEATURES);
 
     assertFalse(result.isValid());
-    assertEquals(1, result.keyViolations().size());
-    assertEquals(1, result.keyViolations().get(0).violationCount());
+    assertEquals(1, result.foreignKeyViolations().size());
+    assertEquals(1, result.foreignKeyViolations().get(0).violationCount());
   }
 
   @Test
@@ -107,7 +107,7 @@ class DuckDbDataPackageAnalyserTest {
             ValidationOptions.defaults(),
             AnalysisFeature.ALL_FEATURES);
 
-    assertTrue(result.keyViolations().isEmpty());
+    assertTrue(result.foreignKeyViolations().isEmpty());
     assertFalse(result.isValid());
     // age has 1 bad value ("notanumber"), active has 1 ("maybe"), birth_date has 1 ("not-a-date")
     assertEquals(3, result.dataTypeViolations().size());
